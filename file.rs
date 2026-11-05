@@ -1,0 +1,138 @@
+use std::{
+    fs::{self, File},
+    io::{self, prelude::*},
+    path::Path,
+  };
+  
+use serde_json::Value;
+  
+use crate::CliError;
+
+use std::collections::HashSet;
+
+use clap::{Arg, ArgAction, ArgGroup, ArgMatches, Command};
+  
+  pub trait FilePath: AsRef<Path> {
+    fn create_file_if_not_exists(&self) -> io::Result<File> {
+        let path = self.as_ref();
+        if let Some(parent) = path.parent() {
+            fs::create_dir_all(parent)?;
+        }
+        File::options().write(true).create_new(true).open(path)
+    }
+
+    fn read_file(&self) -> io::Result<File> {
+        File::options().read(true).open(self.as_ref())
+    }
+
+    fn open_read_write(&self) -> io::Result<File> {
+        File::options().read(true).write(true).open(self.as_ref())
+    }
+
+    fn open_read(&self) -> io::Result<File> {
+        File::options().read(true).open(self.as_ref())
+    }
+
+    fn delete_if_exists(&self) -> io::Result<()> {
+        let path = self.as_ref();
+        if !path.exists() {
+            return Ok(());
+        }
+        if path.is_dir() {
+            fs::remove_dir_all(path)?;
+        } else {
+            fs::remove_file(path)?;
+        }
+        Ok(())
+    }
+}
+
+impl<P: AsRef<Path>> FilePath for P {}
+
+pub fn write_json_to_file(json: &Value, file: &mut File) -> Result<(), CliError> {
+    let json_string = serde_json::to_string_pretty(&json)?;
+
+    file.seek(io::SeekFrom::Start(0))?;
+    file.set_len(0)?;
+    file.write_all(json_string.as_bytes())?;
+
+    Ok(())
+}
+
+use crate::{
+    CliResponse, CliResult, GlobalContext, TrackerData,
+    command_prelude::ArgMatchesExt,
+    utils::file::{FilePath, write_json_to_file},
+    utils::parsers::parse_category,
+};
+
+pub fn cli() -> Command {
+    Command::new("delete")
+        .about("Delete transaction records")
+        .arg(
+            Arg::new("ids")
+                .short('i')
+                .long("ids")
+                .value_parser(clap::value_parser!(usize))
+                .action(ArgAction::Append)
+                .value_delimiter(','),
+        )
+        .arg(
+            Arg::new("by-cat")
+                .short('c')
+                .long("by-cat")
+                .value_parser(parse_category),
+        )
+        .arg(
+            Arg::new("by-subcat")
+                .short('s')
+                .long("by-subcat"),
+        )
+        .group(
+            ArgGroup::new("delete_by")
+                .args(["ids", "by-cat", "by-subcat"])
+                .multiple(false)
+                .required(true),
+        )
+}
+
+pub fn exec(gctx: &mut GlobalContext, args: &ArgMatches) -> CliResult {
+    let mut file = gctx.tracker_path().open_read_write()?;
+    let mut tracker_data: TrackerData = serde_json::from_reader(&file)?;
+
+    if args.contains_id("ids") {
+        let ids: Vec<usize> = args.get_vec::<usize>("ids");
+        let ids_set: HashSet<usize> = ids.into_iter().collect();
+
+        tracker_data.records.retain(|r| !ids_set.contains(&r.id));
+    } else if args.contains_id("by-cat") {
+        let category = args.get_category("by-cat")?;
+        let category_str = category.to_string();
+        let category_id = tracker_data.category_id(&category_str);
+
+        tracker_data.records.retain(|r| r.category != category_id);
+    } else if args.contains_id("by-subcat") {
+        let subcategory_name = args
+            .get_subcategory_opt("by-subcat")
+            .ok_or_else(|| crate::CliError::Other("Subcategory not provided".to_string()))?;
+
+        let subcategory_id = tracker_data
+            .subcategory_id(subcategory_name.as_str())
+            .ok_or_else(|| {
+                crate::CliError::ValidationError(crate::ValidationErrorKind::SubcategoryNotFound {
+                    name: subcategory_name.clone(),
+                })
+            })?;
+
+        tracker_data
+            .records
+            .retain(|r| r.subcategory != subcategory_id);
+    }
+
+    tracker_data.last_modified = chrono::Utc::now().to_rfc3339();
+
+    let tracker_json = serde_json::json!(tracker_data);
+    write_json_to_file(&tracker_json, &mut file)?;
+
+    Ok(CliResponse::success())
+}
