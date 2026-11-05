@@ -8,4 +8,8 @@ The Local-First CLI Financial Tracker is designed for power users and privacy ad
 Stored locally in an encrypted database. No accounts, no cloud syncs, and zero telemetry.Fast CLI Workflow: Keyboard-driven navigation, autocomplete, and a minimal resource footprint.
 
 # Terminal Analytics: 
-Render ASCII charts, spending distributions, and cash-flow trends directly inside your shell.Flexible Import/Export: Import CSVs from major banks and export data anytime in JSON, CSV, or Markdown.Smart Rules & Budgets: Auto-categorize transactions using regex patterns and set visual spending alerts for category limits.
+Render ASCII charts, spending distributions, and cash-flow trends directly inside your shell.
+
+Flexible Import/Export: Import CSVs from major banks and export data anytime in JSON, CSV, or Markdown.
+
+Smart Rules & Budgets: Auto-categorize transactions using regex patterns and set visual spending alerts for category limits.
